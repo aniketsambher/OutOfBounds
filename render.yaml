@@ -1,0 +1,21 @@
+# Render Blueprint: one free web service that runs the API and serves the built web app.
+# Secrets (DATABASE_URL, GEMINI_API_KEY) are entered in the Render dashboard, never committed.
+services:
+  - type: web
+    name: out-of-bounds
+    runtime: node
+    plan: free
+    buildCommand: npm --prefix web ci && npm --prefix web run build && npm --prefix server ci
+    startCommand: npm --prefix server start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: ALLOW_DEMO
+        value: "true"
