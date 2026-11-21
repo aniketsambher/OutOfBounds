@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react';
 import { Circle, MapContainer, Marker, TileLayer } from 'react-leaflet';
 import { Link } from 'react-router-dom';
 import { Icon } from '../components/Icon';
-import { MapToggle } from '../components/MapToggle';
 import { neighborhoods, places } from '../data/seed';
 import type { PlaceType } from '../data/types';
 import { useCheckIn } from '../hooks/useCheckIn';
@@ -49,7 +48,7 @@ export function ExploreMap() {
   return (
     <div className="flex h-[calc(100dvh-76px)] flex-col">
       <div className="flex flex-col gap-2.5 bg-paper px-4 pb-2.5 pt-3.5">
-        <MapToggle active="explore" />
+        <h1 className="font-display text-[26px] font-extrabold leading-none tracking-tight">Explore</h1>
         <div className="flex gap-2 overflow-x-auto pb-0.5">
           {filters.map((f) => (
             <button

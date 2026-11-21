@@ -3,7 +3,6 @@ import { Fragment, useMemo, useState } from 'react';
 import { Circle, MapContainer, Marker, TileLayer } from 'react-leaflet';
 import { Icon } from '../components/Icon';
 import { CampusLogo } from '../components/Logo';
-import { MapToggle } from '../components/MapToggle';
 import { campuses, places } from '../data/seed';
 import type { CampusId } from '../data/types';
 import { useCheckIn } from '../hooks/useCheckIn';
@@ -41,7 +40,7 @@ export function TurfMap() {
   return (
     <div className="flex h-[calc(100dvh-76px)] flex-col">
       <div className="flex flex-col gap-2 bg-paper px-4 pb-2.5 pt-3.5">
-        <MapToggle active="turf" />
+        <h1 className="font-display text-[26px] font-extrabold leading-none tracking-tight">Turf</h1>
         <span className="flex h-7 items-center gap-1.5 self-start rounded-full bg-navy px-3 text-xs font-semibold text-white">
           <b className="text-gold">2×</b> in rival zones · most stamps this week wins
         </span>

@@ -4,7 +4,8 @@ import { Icon } from './Icon';
 
 const tabs: Array<{ to: string; label: string; icon: IconName; match: (p: string) => boolean }> = [
   { to: '/', label: 'Passport', icon: 'passport', match: (p) => p === '/' || p.startsWith('/n/') || p.startsWith('/stamp') },
-  { to: '/explore', label: 'Map', icon: 'map', match: (p) => p.startsWith('/explore') || p.startsWith('/turf') },
+  { to: '/explore', label: 'Explore', icon: 'compass', match: (p) => p.startsWith('/explore') },
+  { to: '/turf', label: 'Turf', icon: 'flag', match: (p) => p.startsWith('/turf') },
   { to: '/cup', label: 'Bubble Cup', icon: 'trophy', match: (p) => p.startsWith('/cup') },
   { to: '/me', label: 'Profile', icon: 'user', match: (p) => p.startsWith('/me') },
 ];
@@ -24,7 +25,7 @@ export function TabBar() {
             key={t.to}
             to={t.to}
             aria-current={active ? 'page' : undefined}
-            className={`flex min-h-[48px] min-w-[64px] flex-col items-center gap-[3px] text-[11px] ${
+            className={`flex min-h-[48px] min-w-[56px] flex-col items-center gap-[3px] text-[11px] ${
               active ? 'font-bold text-brick' : 'font-semibold text-muted'
             }`}
           >
