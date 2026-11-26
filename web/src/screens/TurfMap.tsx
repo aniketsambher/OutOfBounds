@@ -6,13 +6,14 @@ import { CampusLogo } from '../components/Logo';
 import { campuses, places } from '../data/seed';
 import type { CampusId } from '../data/types';
 import { useCheckIn } from '../hooks/useCheckIn';
-import { allZoneStatuses, campusById, zoneForPos } from '../lib/game';
+import { allZoneStatuses, campusById, weekStart, zoneForPos } from '../lib/game';
 import { zoneIcon } from '../lib/markers';
 import { useGame, useZoneCounts } from '../store/game';
 
 export function TurfMap() {
   const checkIns = useGame((s) => s.checkIns);
   const campusId = useGame((s) => s.campusId);
+  const turfResetAt = useGame((s) => s.turfResetAt);
   const counts = useZoneCounts();
   const [selected, setSelected] = useState<CampusId>(campusId === 'bu' ? 'neu' : 'bu');
   const { run, busyId, error } = useCheckIn();
@@ -23,7 +24,9 @@ export function TurfMap() {
   const zone = campusById[selected];
   const status = statuses[selected];
   const owner = campusById[status.owner];
-  const myStamps = checkIns.filter((c) => c.zoneId === selected).length;
+  // Turf is weekly, so only count this week's stamps (and none from before a turf reset on this device).
+  const since = Math.max(weekStart(), turfResetAt);
+  const myStamps = checkIns.filter((c) => c.zoneId === selected && c.at >= since).length;
   const isHome = selected === campusId;
   const posts = places.filter((p) => !p.neighborhoodId && zoneForPos(p.pos) === selected);
   const top = status.ranking.slice(0, 3);
@@ -114,7 +117,7 @@ export function TurfMap() {
           <span className="flex h-7 items-center rounded-full bg-brick-tint px-2.5 text-xs font-bold text-brick-dark">
             You: {myStamps} stamp{myStamps === 1 ? '' : 's'} here · {isHome ? '1×' : '2×'} points
           </span>
-          <span className="text-xs text-[#4A5064]">Resets Sunday</span>
+          <span className="text-xs text-[#4A5064]">Resets Sunday midnight</span>
         </div>
 
         {posts.length > 0 && (

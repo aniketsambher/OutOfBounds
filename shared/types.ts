@@ -65,6 +65,12 @@ export interface CheckIn {
   completedNeighborhood?: string;
   /** Zones the player's campus captured because of this check-in. */
   captured?: CampusId[];
+  /**
+   * True when the server checked the location (GPS) or a team account made it: it counts on the shared
+   * turf map. False for visitor check-ins without GPS, which only show up for the player who made them.
+   * Missing for check-ins made offline on this device.
+   */
+  verified?: boolean;
 }
 
 export interface GameAlert {

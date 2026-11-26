@@ -110,3 +110,10 @@ export const demoHistory: Array<[placeId: string, isoDate: string]> = [
   ['al-kbbq', '2026-11-02T18:30:00'],
   ['al-ringer', '2026-11-02T19:45:00'],
 ];
+
+/** This week's featured neighborhood: check-ins there earn extra points (stacks with the 2× away bonus). */
+export const weeklyChallenge = {
+  neighborhoodId: 'chinatown',
+  title: 'Chinatown Dumpling Dash',
+  multiplier: 2,
+};

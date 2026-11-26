@@ -60,7 +60,7 @@ Real GPS and the camera only work on **https** sites, so deploy before testing o
    ```bash
    cd /opt/oob/web && rm -rf node_modules && npm ci && npm run build
    cd /opt/oob/server && rm -rf node_modules && npm ci
-   cp .env.example .env && nano .env     # DATABASE_URL, GEMINI_API_KEY, ALLOW_DEMO
+   cp .env.example .env && nano .env     # DATABASE_URL, GEMINI_API_KEY, TEAM_KEY, ALLOW_DEMO=false
    ```
 5. Run it as a service:
    ```bash
@@ -96,7 +96,10 @@ Only needed if we add live "next train" times. Free key at api-v3.mbta.com.
 
 ## Notes
 
-- **ALLOW_DEMO:** keep `true` for the stage demo (check in without GPS, simulate rivals, reset turf). Set `false` for real play.
+- **TEAM_KEY (public sites):** a long random password, set in the host's settings (Render dashboard or `server/.env`), never in git. Make one with `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`. Teammates enter it once in Profile → **Team access** to get the demo controls. Change it after an event and the old one stops working.
+- **VISITOR_MODE:** `true` lets anyone play without GPS, but those stamps only show up for them and never change the shared turf map. Set `false` to require real GPS from everyone who isn't on the team.
+- **ALLOW_DEMO:** `true` gives every player team powers. Fine for local development or a private stage server; keep it `false` on any public site.
+- **Render:** set `DATABASE_URL` in the dashboard. Without it, Render wipes the database on every restart and deploy (the server log warns about this), and `/api/health` shows `"db":"pglite"` instead of `"postgres"`. Free services sleep after 15 minutes without visitors, so the first visit can take about a minute.
 - **Phones on your Wi-Fi (before deploying):** run both dev servers, open `http://<your-PC's-IP>:5173`, keep demo mode on.
 - **OneDrive:** the project folder syncs `node_modules`. If OneDrive slows down, pause syncing or move the project outside OneDrive. The local dev database is already kept outside it.
 - **Local dev database:** `~/.out-of-bounds/pglite`. Delete that folder to start fresh.

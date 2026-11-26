@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { Icon } from '../components/Icon';
 import { StampSeal } from '../components/StampSeal';
-import { campusById, neighborhoodById, placeById, progressFor, STAMP_GOAL } from '../lib/game';
+import { campusById, challengeBoosted, neighborhoodById, placeById, progressFor, STAMP_GOAL } from '../lib/game';
 import { useGame } from '../store/game';
-import { neighborhoods } from '../data/seed';
+import { neighborhoods, weeklyChallenge } from '../data/seed';
 
 const ratings = ['Loved it', 'It was fine', 'Not for me'];
 
@@ -12,6 +12,7 @@ export function StampEarned() {
   const { id = '' } = useParams();
   const checkIns = useGame((s) => s.checkIns);
   const campusId = useGame((s) => s.campusId);
+  const online = useGame((s) => Boolean(s.server));
   const [rating, setRating] = useState<string | null>(null);
   const [shared, setShared] = useState(false);
 
@@ -25,6 +26,8 @@ export function StampEarned() {
   const progress = n ? progressFor(checkIns, n.id) : undefined;
   const zone = checkIn.zoneId ? campusById[checkIn.zoneId] : undefined;
   const me = campusById[campusId];
+  /** Visitor check-in without GPS: it counts for this player only, not on the shared turf map. */
+  const privateStamp = online && checkIn.verified === false;
   const date = new Date(checkIn.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
 
   async function share() {
@@ -74,9 +77,13 @@ export function StampEarned() {
         <h1 className="font-display text-[32px] font-extrabold leading-tight">{completed ? 'Bubble popped!' : 'Nice one!'}</h1>
         <p className="text-[15px] leading-relaxed text-[#C9D1E3]">
           +{checkIn.points} points{checkIn.away ? ` (2× away game in ${zone?.short} turf)` : ''}
+          {challengeBoosted(checkIn) ? ` (${weeklyChallenge.multiplier}× ${weeklyChallenge.title})` : ''}
           {checkIn.bonus ? ` · +${checkIn.bonus} mix bonus` : ''}
           {completed ? ` · ${stampedCount} of ${neighborhoods.length} neighborhoods` : ''}
         </p>
+        {privateStamp && (
+          <p className="text-xs leading-snug text-gold">Visitor stamp: only you can see it. It doesn't change the shared turf map.</p>
+        )}
       </div>
 
       {checkIn.captured?.map((z) => (
@@ -86,7 +93,7 @@ export function StampEarned() {
           </span>
           <span className="text-sm">
             <b className="block text-base text-gold">{me.team} captured {campusById[z].short}!</b>
-            Your check-in tipped the {campusById[z].name} zone.
+            {privateStamp ? 'On your map, your' : 'Your'} check-in tipped the {campusById[z].name} zone.
           </span>
         </div>
       ))}

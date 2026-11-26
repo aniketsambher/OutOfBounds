@@ -1,5 +1,5 @@
 # Render Blueprint: one free web service that runs the API and serves the built web app.
-# Secrets (DATABASE_URL, GEMINI_API_KEY) are entered in the Render dashboard, never committed.
+# Secrets (DATABASE_URL, GEMINI_API_KEY, TEAM_KEY) are entered in the Render dashboard, never committed.
 services:
   - type: web
     name: out-of-bounds
@@ -11,11 +11,21 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
+      # Required: without it Render wipes all player progress on every restart and deploy.
       - key: DATABASE_URL
         sync: false
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-flash-lite-latest
-      - key: ALLOW_DEMO
+      - key: GEMINI_DAILY_LIMIT
+        value: "300"
+      # Team password for the shared demo controls. Share it with teammates privately.
+      - key: TEAM_KEY
+        sync: false
+      # Public site: visitors can play without GPS, but only they see those stamps.
+      - key: VISITOR_MODE
         value: "true"
+      # Never true on a public site: it gives every visitor team powers.
+      - key: ALLOW_DEMO
+        value: "false"
