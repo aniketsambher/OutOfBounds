@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CampusId, CheckIn, GameAlert, LatLng } from '../data/types';
@@ -9,6 +10,8 @@ import {
   computeZoneCounts,
   makeCheckIn,
   placeById,
+  rivalMove,
+  weekStart,
   type Boosts,
   type ZoneCounts,
 } from '../lib/game';
@@ -26,15 +29,19 @@ interface GameState {
   onboarded: boolean;
   name: string;
   campusId: CampusId;
-  /** Skips the GPS distance check so check-ins work on stage. */
+  /** Check in without GPS. On the shared server this needs a team account or visitor mode. */
   demoMode: boolean;
   checkIns: CheckIn[];
-  /** Local-only: simulated stamps from other students. */
+  /** Simulated stamps from other students that only this player sees (visitor or offline). */
   boosts: Boosts;
+  /** "Reset turf" for one player: their own unshared stamps from before this time stop counting on their map. */
+  turfResetAt: number;
   alerts: GameAlert[];
   /** Shared-game session (server mode). */
   token?: string;
   playerId?: string;
+  /** Team account: check-ins without GPS count on the shared map, and the demo controls change the shared game. */
+  isTeam: boolean;
   /** Not persisted: set when the API server is reachable. */
   server: ServerInfo | null;
   serverCounts: ZoneCounts | null;
@@ -43,12 +50,14 @@ interface GameState {
   refreshTurf: () => Promise<void>;
   setProfile: (name: string, campusId: CampusId, withDemoHistory: boolean) => Promise<void>;
   checkIn: (placeId: string, opts?: { pos?: LatLng; photo?: { data: string; mimeType: string } }) => Promise<CheckInResult>;
-  simulateRival: (zoneId: CampusId, campusId: CampusId, amount: number) => Promise<void>;
+  joinTeam: (key: string) => Promise<void>;
+  simulateRival: () => Promise<void>;
   resetTurf: () => Promise<void>;
-  receiveCapture: (e: CaptureEvent) => void;
+  resetProgress: () => Promise<void>;
+  signOut: () => Promise<void>;
+  receiveCapture: (e: CaptureEvent) => Promise<void>;
   dismissAlert: (id: string) => void;
   setDemoMode: (on: boolean) => void;
-  reset: () => void;
 }
 
 const initial = {
@@ -58,10 +67,37 @@ const initial = {
   demoMode: true,
   checkIns: [] as CheckIn[],
   boosts: {} as Boosts,
+  turfResetAt: 0,
   alerts: [] as GameAlert[],
   token: undefined as string | undefined,
   playerId: undefined as string | undefined,
+  isTeam: false,
 };
+
+/** Whether this player may check in without GPS right now. */
+export const canSkipGps = (s: Pick<GameState, 'server' | 'isTeam'>) => !s.server || s.isTeam || s.server.visitorMode;
+
+/** Visitor on the shared server: check-ins without GPS only show up for this player. */
+export const isVisitor = (s: Pick<GameState, 'server' | 'isTeam'>) => Boolean(s.server) && !s.isTeam;
+
+type ViewState = Pick<GameState, 'server' | 'serverCounts' | 'checkIns' | 'campusId' | 'boosts' | 'turfResetAt'>;
+
+/**
+ * The turf map as this player sees it: the shared counts (or the seed data when offline), plus rivals they
+ * simulated, plus their own check-ins this week that the shared map doesn't include (visitor or offline stamps).
+ */
+export function viewCounts(s: ViewState): ZoneCounts {
+  const since = Math.max(weekStart(), s.turfResetAt);
+  if (s.server && s.serverCounts) {
+    return computeZoneCounts(s.checkIns.filter((c) => !c.verified), s.campusId, s.boosts, { base: s.serverCounts, since });
+  }
+  return computeZoneCounts(s.checkIns, s.campusId, s.boosts, { since });
+}
+
+/** Counts a simulated rival move is planned on: the shared map for team accounts (that's what they change), else the player's own view. */
+export function rivalBase(s: ViewState & Pick<GameState, 'isTeam'>): ZoneCounts {
+  return s.server && s.isTeam && s.serverCounts ? s.serverCounts : viewCounts(s);
+}
 
 let alertSeq = 0;
 const newAlertId = () => `alert-${Date.now()}-${alertSeq++}`;
@@ -96,6 +132,9 @@ const changedOwners = (before: ZoneCounts, after: ZoneCounts): CaptureEvent[] =>
     .map((z) => ({ zoneId: z, owner: a[z].owner, previousOwner: b[z].owner }));
 };
 
+/** One connection attempt at a time (React runs effects twice in development). */
+let connecting: Promise<void> | null = null;
+
 export const useGame = create<GameState>()(
   persist(
     (set, get) => ({
@@ -103,37 +142,48 @@ export const useGame = create<GameState>()(
       server: null,
       serverCounts: null,
 
-      connect: async () => {
-        let info: ServerInfo;
-        try {
-          info = await api.health();
-        } catch {
-          set({ server: null });
-          return;
-        }
-        set({ server: info });
-        const s = get();
-        // Join the shared game with the same profile (played offline, or the server's database was reset).
-        const join = async () => {
-          const r = await api.createPlayer(s.name, s.campusId, s.checkIns.length > 0);
-          set({ token: r.token, playerId: r.player.id, checkIns: r.checkIns });
-        };
-        try {
-          if (s.onboarded && s.token) {
-            try {
-              const me = await api.me(s.token);
-              set({ checkIns: me.checkIns, name: me.player.name, campusId: me.player.campusId, playerId: me.player.id });
-            } catch (e) {
-              if (e instanceof ApiError && e.status === 401) await join();
-              else throw e;
-            }
-          } else if (s.onboarded) {
-            await join();
+      connect: () => {
+        connecting ??= (async () => {
+          let info: ServerInfo;
+          try {
+            info = await api.health();
+          } catch {
+            set({ server: null });
+            return;
           }
-        } catch {
-          /* server reachable but the session couldn't be restored; stay on local data */
-        }
-        await get().refreshTurf();
+          set({ server: info });
+          const s = get();
+          const local = s.checkIns.map(({ placeId, at }) => ({ placeId, at }));
+          // Join the shared game with the same profile, bringing along anything played offline.
+          const join = async () => {
+            const r = await api.createPlayer(s.name, s.campusId, false, local);
+            set({ token: r.token, playerId: r.player.id, isTeam: r.player.isTeam, checkIns: r.checkIns });
+          };
+          try {
+            if (s.onboarded && s.token) {
+              try {
+                const me = await api.me(s.token);
+                let checkIns = me.checkIns;
+                // Check-ins made on this device while the server was unreachable get added, not dropped.
+                const missing = local.filter((l) => !checkIns.some((c) => c.placeId === l.placeId));
+                if (missing.length) checkIns = (await api.importCheckIns(s.token, missing)).checkIns;
+                set({ checkIns, name: me.player.name, campusId: me.player.campusId, playerId: me.player.id, isTeam: me.player.isTeam });
+              } catch (e) {
+                // 401: the server no longer knows this player (its database was reset).
+                if (e instanceof ApiError && e.status === 401) await join();
+                else throw e;
+              }
+            } else if (s.onboarded) {
+              await join();
+            }
+          } catch {
+            /* server reachable but the session couldn't be restored; stay on local data */
+          }
+          await get().refreshTurf();
+        })().finally(() => {
+          connecting = null;
+        });
+        return connecting;
       },
 
       refreshTurf: async () => {
@@ -147,87 +197,127 @@ export const useGame = create<GameState>()(
       },
 
       setProfile: async (name, campusId, withDemoHistory) => {
-        const base = { onboarded: true, name: name.trim(), campusId, boosts: {}, alerts: [] };
+        const base = { onboarded: true, name: name.trim(), campusId, boosts: {}, turfResetAt: 0, alerts: [] };
         if (get().server) {
           try {
             const r = await api.createPlayer(name.trim(), campusId, withDemoHistory);
-            set({ ...base, token: r.token, playerId: r.player.id, checkIns: r.checkIns });
+            set({ ...base, token: r.token, playerId: r.player.id, isTeam: r.player.isTeam, checkIns: r.checkIns });
             await get().refreshTurf();
             return;
           } catch {
             set({ server: null });
           }
         }
-        set({ ...base, token: undefined, playerId: undefined, checkIns: withDemoHistory ? buildDemoHistory(campusId) : [] });
+        set({ ...base, token: undefined, playerId: undefined, isTeam: false, checkIns: withDemoHistory ? buildDemoHistory(campusId) : [] });
       },
 
       checkIn: async (placeId, opts = {}) => {
         const s = get();
         if (!placeById[placeId]) return { ok: false, error: 'Unknown place.' };
         if (s.checkIns.some((c) => c.placeId === placeId)) return { ok: false, error: "You've already stamped this spot." };
-        const me = campusById[s.campusId];
 
         if (s.server && s.token) {
+          let checkIn: CheckIn;
           try {
-            const demo = s.demoMode && s.server.allowDemo;
-            const { checkIn } = await api.checkIn(s.token, { placeId, demo, pos: opts.pos, photo: opts.photo });
-            const alerts = (checkIn.captured ?? []).map((z) =>
-              captureAlert({ zoneId: z, owner: s.campusId, previousOwner: z }, s.campusId),
-            );
-            set({ checkIns: [...get().checkIns, checkIn], alerts: [...alerts, ...get().alerts] });
-            void get().refreshTurf();
-            return { ok: true, checkIn };
+            const demo = s.demoMode && canSkipGps(s);
+            ({ checkIn } = await api.checkIn(s.token, { placeId, demo, pos: opts.pos, photo: opts.photo }));
           } catch (e) {
-            return { ok: false, error: e instanceof Error ? e.message : 'Check-in failed.' };
+            if (e instanceof ApiError) return { ok: false, error: e.message };
+            set({ server: null }); // unreachable: show "Offline" and keep retrying in the background
+            return { ok: false, error: "Can't reach the server right now. Try again in a moment." };
           }
+          const cur = get();
+          const before = viewCounts(cur);
+          if (!checkIn.verified) {
+            // Visitor stamp: the shared map doesn't change, but this player's own map can.
+            const after = viewCounts({ ...cur, checkIns: [...cur.checkIns, checkIn] });
+            const won = changedOwners(before, after).filter((e) => e.owner === cur.campusId).map((e) => e.zoneId);
+            if (won.length) checkIn.captured = won;
+          }
+          const owners = allZoneStatuses(before);
+          const alerts = (checkIn.captured ?? []).map((z) =>
+            captureAlert({ zoneId: z, owner: cur.campusId, previousOwner: owners[z].owner }, cur.campusId),
+          );
+          set({ checkIns: [...cur.checkIns, checkIn], alerts: [...alerts, ...cur.alerts] });
+          void get().refreshTurf();
+          return { ok: true, checkIn };
         }
 
         // Offline / local mode.
-        const before = computeZoneCounts(s.checkIns, s.campusId, s.boosts);
+        const before = viewCounts(s);
         const checkIn = makeCheckIn(s.checkIns, placeId, Date.now(), s.campusId);
         const checkIns = [...s.checkIns, checkIn];
-        const events = changedOwners(before, computeZoneCounts(checkIns, s.campusId, s.boosts)).filter((e) => e.owner === me.id);
+        const events = changedOwners(before, viewCounts({ ...s, checkIns })).filter((e) => e.owner === s.campusId);
         if (events.length) checkIn.captured = events.map((e) => e.zoneId);
         set({ checkIns, alerts: [...events.map((e) => captureAlert(e, s.campusId)), ...s.alerts] });
         return { ok: true, checkIn };
       },
 
-      simulateRival: async (zoneId, campusId, amount) => {
+      joinTeam: async (key) => {
         const s = get();
-        if (s.server) {
-          // The server broadcasts any capture over the live event stream.
-          const { counts } = await api.simulate(zoneId, campusId, amount);
+        if (!s.server || !s.token) throw new Error('Connect to the live server first.');
+        const { player } = await api.joinTeam(s.token, key);
+        set({ isTeam: player.isTeam });
+      },
+
+      simulateRival: async () => {
+        const s = get();
+        const move = rivalMove(rivalBase(s), s.campusId);
+        if (!move) throw new Error('Your campus holds no zones right now, so there is nothing to defend.');
+        if (s.server && s.isTeam && s.token) {
+          // Shared game: the server announces any capture to everyone over the live event stream.
+          const { counts } = await api.simulate(s.token, move.zoneId, move.attacker, move.amount);
           set({ serverCounts: counts });
           return;
         }
-        const before = computeZoneCounts(s.checkIns, s.campusId, s.boosts);
+        // Visitor or offline: the rival only shows up on this player's map.
         const boosts: Boosts = {
           ...s.boosts,
-          [zoneId]: { ...s.boosts[zoneId], [campusId]: (s.boosts[zoneId]?.[campusId] ?? 0) + amount },
+          [move.zoneId]: { ...s.boosts[move.zoneId], [move.attacker]: (s.boosts[move.zoneId]?.[move.attacker] ?? 0) + move.amount },
         };
-        const events = changedOwners(before, computeZoneCounts(s.checkIns, s.campusId, boosts));
+        const events = changedOwners(viewCounts(s), viewCounts({ ...s, boosts }));
         set({ boosts, alerts: [...events.map((e) => captureAlert(e, s.campusId)), ...s.alerts] });
       },
 
       resetTurf: async () => {
-        if (get().server) {
-          const { counts } = await api.resetTurf();
+        const s = get();
+        if (s.server && s.isTeam && s.token) {
+          const { counts } = await api.resetTurf(s.token);
           set({ serverCounts: counts });
-        } else {
-          set({ boosts: {} });
+          return;
         }
+        set({ boosts: {}, turfResetAt: Date.now() });
       },
 
-      receiveCapture: (e) => {
+      resetProgress: async () => {
         const s = get();
-        void s.refreshTurf();
+        if (s.server && s.token) {
+          // Same account on the server, so the old check-ins can't be counted twice.
+          const { checkIns } = await api.resetMe(s.token, true);
+          set({ checkIns, alerts: [] });
+          void get().refreshTurf();
+          return;
+        }
+        set({ checkIns: buildDemoHistory(s.campusId), alerts: [] });
+      },
+
+      signOut: async () => {
+        const s = get();
+        if (s.server && s.token) await api.deleteMe(s.token).catch(() => undefined);
+        set({ ...initial });
+      },
+
+      receiveCapture: async (e) => {
+        await get().refreshTurf();
+        const s = get();
         if (e.byPlayerId && e.byPlayerId === s.playerId) return; // already alerted from our own check-in
+        // A visitor's own stamps can keep a zone looking different on their map; only announce what they see.
+        if (allZoneStatuses(viewCounts(s))[e.zoneId].owner !== e.owner) return;
         set({ alerts: [captureAlert(e, s.campusId), ...s.alerts] });
       },
 
       dismissAlert: (id) => set({ alerts: get().alerts.filter((a) => a.id !== id) }),
       setDemoMode: (on) => set({ demoMode: on }),
-      reset: () => set({ ...initial }),
     }),
     {
       name: 'out-of-bounds-v1',
@@ -238,18 +328,30 @@ export const useGame = create<GameState>()(
         demoMode: s.demoMode,
         checkIns: s.checkIns,
         boosts: s.boosts,
+        turfResetAt: s.turfResetAt,
         token: s.token,
         playerId: s.playerId,
+        isTeam: s.isTeam,
       }),
+      // Drop saved check-ins for places that no longer exist, so old data can't break a screen.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<GameState>;
+        return { ...current, ...p, checkIns: (p.checkIns ?? current.checkIns).filter((c) => placeById[c.placeId]) };
+      },
     },
   ),
 );
 
-/** Zone counts from the shared server when connected, otherwise computed on this device. */
+/** Zone counts as this player sees them (shared map plus their own unshared stamps, or local data offline). */
 export function useZoneCounts(): ZoneCounts {
-  const serverCounts = useGame((s) => (s.server ? s.serverCounts : null));
+  const server = useGame((s) => s.server);
+  const serverCounts = useGame((s) => s.serverCounts);
   const checkIns = useGame((s) => s.checkIns);
   const campusId = useGame((s) => s.campusId);
   const boosts = useGame((s) => s.boosts);
-  return serverCounts ?? computeZoneCounts(checkIns, campusId, boosts);
+  const turfResetAt = useGame((s) => s.turfResetAt);
+  return useMemo(
+    () => viewCounts({ server, serverCounts, checkIns, campusId, boosts, turfResetAt }),
+    [server, serverCounts, checkIns, campusId, boosts, turfResetAt],
+  );
 }

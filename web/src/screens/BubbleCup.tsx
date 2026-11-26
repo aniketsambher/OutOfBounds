@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { CampusLogo } from '../components/Logo';
 import { Icon } from '../components/Icon';
-import { bubbleCupAverages, campuses } from '../data/seed';
-import { allZoneStatuses, campusById, zonesHeldBy } from '../lib/game';
+import { bubbleCupAverages, campuses, weeklyChallenge } from '../data/seed';
+import { allZoneStatuses, campusById, neighborhoodById, zonesHeldBy } from '../lib/game';
 import { useGame, useZoneCounts } from '../store/game';
 
 const medal = ['#F2C14E', '#D9DDE6', '#EBD1B5'];
@@ -19,7 +19,7 @@ export function BubbleCup() {
     <div className="flex flex-col gap-3.5 px-5 pb-[96px] pt-[22px]">
       <div className="flex flex-col gap-0.5">
         <h1 className="font-display text-[30px] font-extrabold tracking-tight">Bubble Cup</h1>
-        <p className="text-[13px] text-muted">Which campus gets out the most? Avg. neighborhoods stamped per student, Fall 2026. Flags show turf zones held this week.</p>
+        <p className="text-[13px] text-muted">Which campus gets out the most? Avg. neighborhoods stamped per student, Fall 2026 (sample numbers). Flags show turf zones held this week.</p>
       </div>
 
       <section aria-label="Weekly challenge" className="flex items-center gap-3.5 rounded-[18px] bg-brick px-4 py-3.5 text-white">
@@ -28,8 +28,11 @@ export function BubbleCup() {
         </span>
         <div className="flex flex-col gap-0.5">
           <span className="text-[11px] font-bold tracking-[0.1em] text-[#FFE1D9]">THIS WEEK'S CHALLENGE</span>
-          <span className="font-display text-lg font-bold">Chinatown Dumpling Dash</span>
-          <span className="text-xs text-[#FFE9E3]">Double points in Chinatown · ends Sunday</span>
+          <span className="font-display text-lg font-bold">{weeklyChallenge.title}</span>
+          <span className="text-xs text-[#FFE9E3]">
+            {weeklyChallenge.multiplier === 2 ? 'Double' : `${weeklyChallenge.multiplier}×`} points in{' '}
+            {neighborhoodById[weeklyChallenge.neighborhoodId].name} · ends Sunday midnight
+          </span>
         </div>
       </section>
 

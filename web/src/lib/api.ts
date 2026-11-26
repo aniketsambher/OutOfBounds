@@ -5,13 +5,19 @@ export interface ServerInfo {
   ok: boolean;
   db: 'postgres' | 'pglite';
   gemini: boolean;
+  /** Every account gets team powers (local development / private stage server). */
   allowDemo: boolean;
+  /** The server has a team password, so the Profile shows the "Team access" box. */
+  teamAccess: boolean;
+  /** Non-team players can check in without GPS; those check-ins only show up for them. */
+  visitorMode: boolean;
 }
 
 export interface PlayerInfo {
   id: string;
   name: string;
   campusId: CampusId;
+  isTeam: boolean;
 }
 
 export interface QuestTip {
@@ -20,6 +26,9 @@ export interface QuestTip {
   pitch: string;
   ai: boolean;
 }
+
+/** A check-in made offline on this device, sent to the server to keep. */
+export type CheckInImport = Pick<CheckIn, 'placeId' | 'at'>;
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -38,12 +47,19 @@ async function call<T>(path: string, init: RequestInit & { token?: string } = {}
 
 export const api = {
   health: () => call<ServerInfo>('/api/health', { signal: AbortSignal.timeout(3000) }),
-  createPlayer: (name: string, campusId: CampusId, withDemoHistory: boolean) =>
+  createPlayer: (name: string, campusId: CampusId, withDemoHistory: boolean, checkIns: CheckInImport[] = []) =>
     call<{ player: PlayerInfo; token: string; checkIns: CheckIn[] }>('/api/players', {
       method: 'POST',
-      body: JSON.stringify({ name, campusId, withDemoHistory }),
+      body: JSON.stringify({ name, campusId, withDemoHistory, checkIns }),
     }),
   me: (token: string) => call<{ player: PlayerInfo; checkIns: CheckIn[] }>('/api/me', { token }),
+  deleteMe: (token: string) => call<{ ok: boolean }>('/api/me', { method: 'DELETE', token }),
+  joinTeam: (token: string, key: string) =>
+    call<{ player: PlayerInfo }>('/api/me/team', { method: 'POST', token, body: JSON.stringify({ key }) }),
+  importCheckIns: (token: string, checkIns: CheckInImport[]) =>
+    call<{ checkIns: CheckIn[] }>('/api/me/import', { method: 'POST', token, body: JSON.stringify({ checkIns }) }),
+  resetMe: (token: string, withDemoHistory: boolean) =>
+    call<{ checkIns: CheckIn[] }>('/api/me/reset', { method: 'POST', token, body: JSON.stringify({ withDemoHistory }) }),
   checkIn: (
     token: string,
     body: { placeId: string; demo: boolean; pos?: LatLng; photo?: { data: string; mimeType: string } },
@@ -54,9 +70,9 @@ export const api = {
       body: JSON.stringify({ placeId: body.placeId, demo: body.demo, lat: body.pos?.[0], lng: body.pos?.[1], photo: body.photo }),
     }),
   turf: () => call<{ counts: ZoneCounts }>('/api/turf'),
-  simulate: (zoneId: CampusId, campusId: CampusId, amount: number) =>
-    call<{ counts: ZoneCounts }>('/api/simulate', { method: 'POST', body: JSON.stringify({ zoneId, campusId, amount }) }),
-  resetTurf: () => call<{ counts: ZoneCounts }>('/api/demo/reset-turf', { method: 'POST' }),
+  simulate: (token: string, zoneId: CampusId, campusId: CampusId, amount: number) =>
+    call<{ counts: ZoneCounts }>('/api/simulate', { method: 'POST', token, body: JSON.stringify({ zoneId, campusId, amount }) }),
+  resetTurf: (token: string) => call<{ counts: ZoneCounts }>('/api/demo/reset-turf', { method: 'POST', token }),
   questTip: (token: string) => call<{ tip: QuestTip | null }>('/api/quest-tip', { token }),
 };
 

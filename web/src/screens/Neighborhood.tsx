@@ -10,7 +10,7 @@ export function Neighborhood() {
   const { id = '' } = useParams();
   const n = neighborhoodById[id];
   const checkIns = useGame((s) => s.checkIns);
-  const { run, busyId, error, clearError, demoMode, photoEnabled } = useCheckIn();
+  const { run, busyId, error, clearError, demoMode, visitor, photoEnabled } = useCheckIn();
 
   if (!n) return <Navigate to="/" replace />;
   const list = placesIn(n.id);
@@ -141,7 +141,11 @@ export function Neighborhood() {
         )}
 
         <p className="text-center text-xs text-muted">
-          {demoMode ? 'Demo mode is on: check-ins skip the GPS check.' : 'Check-ins need you within 200 m of the spot.'}
+          {demoMode
+            ? visitor
+              ? 'Visitor mode: check in from anywhere. These stamps show only for you.'
+              : 'Demo mode is on: check-ins skip the GPS check.'
+            : 'Check-ins need you within 200 m of the spot.'}
           {photoEnabled ? ' "+ Photo" lets Gemini confirm you’re really there.' : ''}
         </p>
       </div>

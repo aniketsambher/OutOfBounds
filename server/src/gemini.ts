@@ -6,8 +6,25 @@ export const geminiEnabled = () => Boolean(env.geminiKey);
 
 type Part = { text: string } | { inline_data: { mime_type: string; data: string } };
 
+/** Thrown when the server has used up today's Gemini budget (GEMINI_DAILY_LIMIT). */
+export class GeminiLimitError extends Error {}
+
+let budgetDay = '';
+let budgetUsed = 0;
+
+function takeBudget() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== budgetDay) {
+    budgetDay = today;
+    budgetUsed = 0;
+  }
+  if (budgetUsed >= env.geminiDailyLimit) throw new GeminiLimitError('Daily Gemini limit reached');
+  budgetUsed += 1;
+}
+
 /** Calls the Gemini REST API and parses a JSON reply. */
 async function generateJson<T>(parts: Part[]): Promise<T> {
+  takeBudget();
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.geminiModel)}:generateContent`,
     {

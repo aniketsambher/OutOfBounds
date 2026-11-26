@@ -15,8 +15,8 @@ export function getCurrentPosition(): Promise<LatLng> {
         reject(
           new Error(
             err.code === err.PERMISSION_DENIED
-              ? 'Location permission was denied. Turn on demo mode in Profile to check in without GPS.'
-              : "Couldn't get your location. Try again outside, or use demo mode.",
+              ? 'Location permission was denied. Allow location for this site to check in.'
+              : "Couldn't get your location. Try again outside.",
           ),
         ),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
